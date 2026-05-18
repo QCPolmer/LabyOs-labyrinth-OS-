@@ -9,7 +9,7 @@ for it's liscence )
 The concept is simple: a stand alone no-backend web page editor. 
 It takes a zip file in, can edit it and save it. 
 
-Can test web pages on the same page, and use single-file html
+Can test web pages on the same page, and single-file html
 files can be ran in parts of the file tree like local programs.
 
 There is an 'API' button on page, it shows some stuff that it can do.
