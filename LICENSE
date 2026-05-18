@@ -1,6 +1,17 @@
+
+
+///////////////////////////////////////////////////
+/// Below license is for the HTML-page, 
+/// the JSzip library has it's own license, (see 
+///     JSzip for that license, its cited in the source code) 
+///      In reguards to JSZip: 
+////     (Dual-licensed under MIT or GPLv3. Distributed in this project under the MIT License terms. 
+///      Copyright (c) Stuart Knightley, David Duponchel, Franz Buchinger, António Afonso.)
+////////////////////////////////////////////////////////
+
 MIT License
 
-Copyright (c) 2026 QCPolmer
+Copyright (c) 2026 
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
