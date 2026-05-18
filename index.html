@@ -1,0 +1,881 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Labyrinth VFS Sandbox Engine v8.2</title>
+    <script src="jszip.min.js"></script>
+    <style>
+        :root { 
+            --bg: #0f0f11; --panel: #16161a; --panel-light: #1e1e24;
+            --border: #2a2a35; --text: #dcdccf; --text-muted: #626275;
+            --accent: #4f46e5; --accent-hover: #4338ca; --success: #10b981; --purple: #8b5cf6;
+        }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Courier New', monospace; }
+        body { background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+        
+        /* Navigation Taskbar System */
+        nav { display: flex; background: var(--panel); border-bottom: 1px solid var(--border); overflow-x: auto; flex-shrink: 0; }
+        .tab-btn { display: flex; align-items: center; justify-content: center; min-width: 140px; background: none; border: none; color: var(--text-muted); padding: 12px 16px; cursor: pointer; white-space: nowrap; border-right: 1px solid var(--border); font-size: 13px; font-weight: bold; }
+        .tab-btn:hover { color: #fff; background: #22222b; }
+        .tab-btn.active { color: #fff; border-bottom: 2px solid var(--success); background: var(--bg); }
+        .close-tab { color: #ef4444; margin-left: 10px; cursor: pointer; font-size: 14px; padding: 0 4px; border-radius: 4px;}
+        .close-tab:hover { background: rgba(239, 68, 68, 0.2); }
+
+        /* Workspace Core Splits */
+        #work-area { display: flex; flex-grow: 1; overflow: hidden; position: relative; }
+        .tab-content { display: none; width: 100%; height: 100%; flex-direction: column; position: absolute; top: 0; left: 0; background: var(--bg); }
+        .tab-content.active { display: flex; z-index: 10; }
+        
+        /* Explorer Sidebar Design Layouts */
+        #explorer-sidebar { display: flex; flex-direction: column; height: 100%; width: 100%; }
+        #import-zone { padding: 14px; background: var(--panel); border-bottom: 1px solid var(--border); display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;}
+        #context-bar { background: var(--panel-light); padding: 8px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--text-muted);}
+        
+        /* Search and Mass Structural Manipulation Row */
+        #search-container { padding: 8px 12px 4px 12px; background: var(--panel); display: flex; flex-direction: column; gap: 6px; }
+        #search-bar { width: 100%; background: var(--bg); border: 1px solid var(--border); color: #fff; padding: 8px; border-radius: 4px; outline: none; font-size: 12px;}
+        #search-bar:focus { border-color: var(--accent); }
+        .tree-ctrl-row { display: flex; gap: 8px; justify-content: flex-end; }
+        .btn-ctrl { background: none; border: 1px solid var(--border); color: var(--text-muted); padding: 2px 6px; font-size: 11px; cursor: pointer; border-radius: 3px; }
+        .btn-ctrl:hover { color: #fff; border-color: var(--text-muted); }
+
+        .btn-primary { background: var(--accent); color: #fff; padding: 6px 12px; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; font-weight: bold; }
+        .btn-primary:hover { background: var(--accent-hover); }
+        
+        /* Recursive Tree Layout Mechanics */
+        #tree-container { flex-grow: 1; overflow-y: auto; padding: 12px; }
+        .tree-node { display: flex; flex-direction: column; position: relative; }
+        .tree-row { display: flex; align-items: center; justify-content: space-between; padding: 4px 6px; border-radius: 4px; cursor: pointer; min-height: 28px; }
+        .tree-row:hover { background: rgba(255,255,255,0.04); }
+        .tree-row:hover .node-actions { display: flex; }
+        
+        .node-meta { display: flex; align-items: center; flex-grow: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 13px; }
+        .node-indent { display: inline-block; border-left: 1px dashed var(--border); height: 24px; margin-right: 8px; width: 12px; flex-shrink: 0; }
+        .node-toggle { width: 24px; text-align: center; margin-right: 4px; font-size: 11px; color: var(--text-muted); cursor: pointer; flex-shrink: 0; }
+        .node-icon { margin-right: 6px; flex-shrink: 0; font-size: 11px; color: var(--text-muted); }
+        .node-name { overflow: hidden; text-overflow: ellipsis; }
+        
+        /* Action Triggers Panels */
+        .node-actions { display: none; align-items: center; gap: 4px; position: relative; }
+        .action-btn { background: none; border: none; color: var(--text-muted); padding: 2px 6px; cursor: pointer; font-size: 11px; border-radius: 3px; }
+        .action-btn:hover { color: #fff; background: var(--panel-light); }
+        .action-btn.active-pin { color: #f2c744; }
+        
+        /* Context Utility Selector Dropdowns */
+        .ctx-dropdown { position: absolute; right: 0; top: 100%; background: #1a1a24; border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); z-index: 1000; display: none; min-width: 200px; padding: 4px 0; }
+        .ctx-item { padding: 6px 12px; font-size: 11px; color: var(--text); cursor: pointer; text-align: left; white-space: nowrap; width: 100%; display: block; border: none; background: none;}
+        .ctx-item:hover { background: var(--purple); color: #fff; }
+        .ctx-header { padding: 4px 12px; font-size: 10px; color: var(--text-muted); border-bottom: 1px solid var(--border); margin-bottom: 4px; font-weight: bold; text-transform: uppercase;}
+
+        /* Frame Containers */
+        .app-status-bar { background: var(--panel); color: var(--text-muted); font-size: 11px; padding: 6px 16px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;}
+        textarea { flex-grow: 1; background: var(--bg); color: #d4d4d4; border: none; padding: 12px; resize: none; outline: none; font-size: 14px; line-height: 1.5; }
+        iframe { flex-grow: 1; border: none; background: #fff; width: 100%; height: 100%; }
+        
+        /* Documentation Sheet Layouts */
+        #docs-panel { background: var(--panel); border: 1px solid var(--border); margin: 10px; padding: 14px; border-radius: 6px; display: none; max-height: 350px; overflow-y: auto; }
+        #docs-content { font-size: 12px; color: var(--text); line-height: 1.5; white-space: pre-wrap; }
+        
+        #console-logs { padding: 12px; overflow-y: auto; font-size: 12px; color: #a5d6ff; flex-grow: 1; background: #050507; }
+        .log-err { color: #ef4444; }
+        .log-sys { color: var(--success); }
+    </style>
+</head>
+<body>
+
+    <nav id="tab-nav">
+        <button id="tab-btn-files" class="tab-btn active" onclick="switchTab('files')">[Files] Tree</button>
+        <button id="tab-btn-editor" class="tab-btn" onclick="switchTab('editor')">[Editor] Buffer</button>
+        <button id="tab-btn-logs" class="tab-btn" onclick="switchTab('logs')">[Console] Log</button>
+    </nav>
+
+    <div id="work-area">
+        <div id="tab-files" class="tab-content active">
+            <div id="explorer-sidebar">
+                <div id="import-zone">
+		    <label for="file-input" class="btn-primary" style="background: #2563eb;">[Import Archive]</label>
+		    <input type="file" id="file-input" accept=".zip">
+		    
+		    <button class="btn-primary" style="background: #10b981;" onclick="exportVFS_to_Zip()">[Export .zip Archive]</button>
+		    
+		    <button class="btn-primary" style="background:#374151;" onclick="createNewFile()">[+ New File]</button>
+		    <button class="btn-primary" style="background:#b45309;" onclick="runArbitraryPath()">[Custom Boot]</button>
+		    <button class="btn-primary" style="background:#4b5563;" onclick="toggleDocs()">[Kernel API]</button>
+		</div>
+                
+                <div id="context-bar">
+                    <span><strong>Root Path Context:</strong> <span id="global-ctx-label" style="color:var(--success); font-weight:bold;">/</span></span>
+                    <button class="btn-primary" style="margin:0; padding:2px 8px; font-size:11px; background:var(--panel-light); border:1px solid var(--border);" onclick="changeGlobalContext()">Shift</button>
+                </div>
+
+                <div id="docs-panel">
+                    <div style="font-weight:bold; margin-bottom:12px; border-bottom:1px solid var(--border); padding-bottom:6px; display:flex; justify-content:space-between; color:#fff; font-size:12px;">
+                        <span>LABYOS VFS RUNTIME MANAGEMENT INDEX</span>
+                        <span style="cursor:pointer; color:#ef4444;" onclick="toggleDocs()">[Close]</span>
+                    </div>
+                    <div id="docs-content"></div>
+                </div>
+
+                <div id="search-container">
+                    <input type="text" id="search-bar" placeholder="Filter storage index tree layers..." oninput="renderTree()">
+                    <div class="tree-ctrl-row">
+                        <button class="btn-ctrl" onclick="expandAllFolders()">[Expand All]</button>
+                        <button class="btn-ctrl" onclick="collapseAllFolders()">[Collapse All]</button>
+                    </div>
+                </div>
+                
+                <div id="tree-container"></div>
+            </div>
+        </div>
+
+        <div id="tab-editor" class="tab-content">
+            <div style="padding: 6px 12px; background: var(--panel); color: var(--text-muted); font-size: 12px; display: flex; justify-content: space-between; border-bottom:1px solid var(--border);">
+                <span id="file-label">Select storage target node to edit code layout...</span>
+                <span id="save-status" style="color: var(--success); display: none; font-weight: bold;">[Sync OK]</span>
+            </div>
+            <textarea id="code-editor" spellcheck="false" placeholder="// Select a file in the folder hierarchy tree..."></textarea>
+        </div>
+
+        <div id="tab-logs" class="tab-content">
+            <div id="console-logs"></div>
+        </div>
+    </div>
+
+    <script>
+        /* DECOUPLED PLAIN CONFIGURATION ARRAYS FOR EASY MAINTENANCE */
+	// NOTE: feel free to put in 'placeholder' or whatever if 
+	// doing another full draft: this can be added at end to 
+	// avoid confusion
+        const SYSTEM_KERNEL_DOCS = `================================================================================
+                    LABYOS KERNEL & VFS API REFERENCE (v8.2)
+================================================================================
+OVERVIEW
+LabyOS is a zero-dependency, client-side Virtual File System (VFS) and execution 
+sandbox. It allows modular HTML/JS applications to run in isolated iframes while 
+maintaining synchronous read/write access to a shared memory matrix.
+
+================================================================================
+[1] THE UTILITY ROUTING ENGINE (/bin/ and Tagging)
+================================================================================
+LabyOS employs a Unix-style utility execution pipeline. 
+
+> AUTOMATIC REGISTRY: Any .html file located within a path starting with '/bin/' 
+  is automatically registered as a Global System Utility.
+> MANUAL REGISTRY: Any .html file toggled with the [*] star icon in the 
+  explorer tree is pinned to the Global System Utility registry.
+
+EXECUTION BEHAVIOR:
+When a utility is launched via the '[Run]' context menu of an arbitrary VFS node 
+(folder or file), the utility boots in a sandboxed frame with its execution 
+target scoped EXPLICITLY to the directory of the clicked node.
+
+================================================================================
+[2] ENVIRONMENTAL VARIABLES
+================================================================================
+Every application executing within LabyOS has the following read-only variables 
+injected into its global 'window' scope upon boot:
+
+window.__VFS_PROGRAM_PATH__  (String)
+    The absolute VFS path of the actual application file running 
+    (e.g., "/bin/editor.html").
+
+window.__VFS_CURRENT_DIR__   (String)
+    The absolute VFS path of the targeted execution directory context.
+    (e.g., "/projects/game1/maps/"). 
+
+window.__VFS_TARGET_FILE__   (String | null)
+    If the utility was launched by targeting a specific FILE node rather than 
+    a directory, this contains the absolute path of that target file. 
+    Crucial for building native editors.
+
+window.file_js_cd() -> String
+    Functional wrapper that returns window.__VFS_CURRENT_DIR__.
+
+================================================================================
+[3] STORAGE I/O ENGINE (VFS MAP MANIPULATION)
+================================================================================
+The following methods allow applications to synchronously mutate the root VFS.
+
+window.file_save(dirContext, fileName, dataString)
+    Writes or overwrites raw string data into the VFS.
+    @param {String|null} dirContext - The base directory. If null, defaults 
+                                      to window.__VFS_CURRENT_DIR__.
+    @param {String} fileName        - The relative or absolute path to write.
+    @param {String} dataString      - The payload to commit to memory.
+    @returns {void}
+
+window.file_load(dirContext, fileName)
+    Reads content text strings from the VFS.
+    @param {String|null} dirContext - The base directory. If null, defaults 
+                                      to window.__VFS_CURRENT_DIR__.
+    @param {String} fileName        - The relative or absolute path to read.
+    @returns {String|null}          - The payload, or null if key is missing.
+
+window.file_dir(dirContext, folderName)
+    Scans for child paths beneath a targeted directory boundary.
+    @param {String|null} dirContext - The base directory. If null, defaults 
+                                      to window.__VFS_CURRENT_DIR__.
+    @param {String} folderName      - The relative sub-folder to scan. 
+                                      Pass "" (empty string) to scan the dirContext.
+    @returns {Array|null}           - Array of relative file paths, or null.
+
+window.file_remove(dirContext, fileName)
+    Completely unlinks and erases a file record from memory instantly.
+    @param {String|null} dirContext - The base directory.
+    @param {String} fileName        - The relative or absolute path to delete.
+    @returns {void}
+
+================================================================================
+[4] BUILDING A NATIVE APPLICATION (Template)
+================================================================================
+To build a tool that integrates natively with the LabyOS execution pipeline, 
+utilize the injected environment variables during your app's boot sequence:
+
+    <script>
+        // 1. Check if the OS passed us a specific file to act upon
+        let activeFile = window.__VFS_TARGET_FILE__;
+
+        if (activeFile) {
+            // 2. Load the data using root context ("/") since the 
+            // activeFile variable is an absolute path.
+            let buffer = window.file_load("/", activeFile);
+            document.getElementById("editor").value = buffer;
+        }
+
+        function saveEdits() {
+            if (activeFile) {
+                let newData = document.getElementById("editor").value;
+                window.file_save("/", activeFile, newData);
+            } else {
+                // Handle "Save As" logic using window.__VFS_CURRENT_DIR__
+            }
+        }
+    /script>
+================================================================================`;
+        window.vfs = {};
+        window.currentContextDir = '/';
+        window.runningApps = {};
+        window.expandedFolders = new Set(['/']);
+        window.pinnedUtilities = new Set();
+        
+        let currentActiveFile = null;
+        let appInstanceCount = 0;
+        let activeOpenMenuId = null;
+
+        /* Mount Injected Decoupled Documentation Buffer Array Nodes */
+        document.getElementById('docs-content').textContent = SYSTEM_KERNEL_DOCS;
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+            
+            const targetTab = document.getElementById('tab-' + tabId);
+            const targetBtn = document.getElementById('tab-btn-' + tabId);
+            
+            if (targetTab) targetTab.classList.add('active');
+            if (targetBtn) targetBtn.classList.add('active');
+        }
+
+        function changeGlobalContext() {
+            let target = prompt("Configure baseline running tracker destination context:", window.currentContextDir);
+            if (target !== null) {
+                if (!target.startsWith('/')) target = '/' + target;
+                if (!target.endsWith('/')) target += '/';
+                window.currentContextDir = target;
+                document.getElementById('global-ctx-label').textContent = target;
+                logToConsole('sys', `Global root context shifted: ${target}`);
+            }
+        }
+
+        function toggleDocs() {
+            const p = document.getElementById('docs-panel');
+            p.style.display = p.style.display === 'block' ? 'none' : 'block';
+        }
+
+        function expandAllFolders() {
+            Object.keys(window.vfs).forEach(path => {
+                let segments = path.split('/');
+                let trace = '/';
+                for (let i = 0; i < segments.length - 1; i++) {
+                    if (segments[i]) {
+                        trace += segments[i] + '/';
+                        window.expandedFolders.add(trace);
+                    }
+                }
+            });
+            renderTree();
+        }
+
+        function collapseAllFolders() {
+            window.expandedFolders.clear();
+            window.expandedFolders.add('/');
+            renderTree();
+        }
+
+        function getGlobalUtilities() {
+            let utils = [];
+            Object.keys(window.vfs).forEach(path => {
+                if(path.startsWith('/bin/') && path.endsWith('.html')) {
+                    utils.push(path);
+                }
+            });
+            window.pinnedUtilities.forEach(path => {
+                if(window.vfs[path] !== undefined && !utils.includes(path)) {
+                    utils.push(path);
+                }
+            });
+            return utils;
+        }
+
+        function launchApp(path, forcedContextDir = null, targetFilePath = null) {
+            appInstanceCount++;
+            const appId = 'app-' + appInstanceCount;
+            const shortName = path.split('/').pop();
+            
+            let workingDir = forcedContextDir || window.currentContextDir;
+            if (!workingDir.endsWith('/')) workingDir += '/';
+            if (!workingDir.startsWith('/')) workingDir = '/' + workingDir;
+
+            window.runningApps[appId] = { path: path, workingDir: workingDir, targetFilePath: targetFilePath };
+
+            const nav = document.getElementById('tab-nav');
+            const btn = document.createElement('button');
+            btn.className = 'tab-btn';
+            btn.id = 'tab-btn-' + appId;
+            btn.innerHTML = `[Run] ${shortName} <span class="close-tab" onclick="closeApp('${appId}', event)">x</span>`;
+            btn.onclick = () => switchTab(appId);
+            nav.appendChild(btn);
+
+            const workArea = document.getElementById('work-area');
+            const content = document.createElement('div');
+            content.className = 'tab-content';
+            content.id = 'tab-' + appId;
+            
+            const statusBar = document.createElement('div');
+            statusBar.className = 'app-status-bar';
+            statusBar.id = 'status-bar-' + appId;
+            
+            let contextLabel = `[Dir] ${workingDir}`;
+            if (targetFilePath) {
+                contextLabel += ` | [Focus File] ${targetFilePath}`;
+            }
+
+            statusBar.innerHTML = `
+                <span><strong>Bin:</strong> ${path} | ${contextLabel}</span>
+                <div>
+                    <button class="btn-primary" style="margin:0 4px 0 0; padding:3px 8px; font-size:11px; background:#4b5563;" onclick="reloadApp('${appId}')">[Reload]</button>
+                    <button class="btn-primary" style="margin:0; padding:3px 8px; font-size:11px; background:var(--purple);" onclick="changeAppContext('${appId}')">[Shift Context]</button>
+                </div>
+            `;
+            
+            const iframe = document.createElement('iframe');
+            iframe.id = 'frame-' + appId;
+            iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+            
+            content.appendChild(statusBar);
+            content.appendChild(iframe);
+            workArea.appendChild(content);
+
+            switchTab(appId);
+            bootIframe(path, iframe.id, workingDir, targetFilePath);
+        }
+
+        function closeApp(appId, event) {
+            event.stopPropagation();
+            document.getElementById('tab-btn-' + appId).remove();
+            document.getElementById('tab-' + appId).remove();
+            delete window.runningApps[appId];
+            switchTab('files');
+        }
+
+        function reloadApp(appId) {
+            const config = window.runningApps[appId];
+            if (config) {
+                logToConsole('sys', `Hot reloading application execution context: ${appId}`);
+                bootIframe(config.path, 'frame-' + appId, config.workingDir, config.targetFilePath);
+            }
+        }
+
+        function changeAppContext(appId) {
+            const config = window.runningApps[appId];
+            if (!config) return;
+            let target = prompt("Redirect core runtime operational directory context path:", config.workingDir);
+            if (target !== null) {
+                if (!target.startsWith('/')) target = '/' + target;
+                if (!target.endsWith('/')) target += '/';
+                config.workingDir = target;
+                reloadApp(appId);
+            }
+        }
+
+        function runArbitraryPath() {
+            let prog = prompt("Enter explicit path pointer layout to target execution frame:", "/bin/editor.html");
+            if(!prog) return;
+            if(window.vfs[prog] === undefined) { alert("Execution Aborted: Virtual path not found!"); return; }
+            launchApp(prog, window.currentContextDir);
+        }
+
+        function toggleContextDropdown(e, menuId) {
+            e.stopPropagation();
+            const openMenu = document.getElementById(menuId);
+            const shouldOpen = openMenu.style.display !== 'block';
+            
+            document.querySelectorAll('.ctx-dropdown').forEach(el => el.style.display = 'none');
+            
+            if (shouldOpen) {
+                openMenu.style.display = 'block';
+                activeOpenMenuId = menuId;
+            } else {
+                activeOpenMenuId = null;
+            }
+        }
+
+        document.addEventListener('click', () => {
+            if (activeOpenMenuId) {
+                document.getElementById(activeOpenMenuId).style.display = 'none';
+                activeOpenMenuId = null;
+            }
+        });
+
+        function renderTree() {
+            const container = document.getElementById('tree-container');
+            const searchFilter = document.getElementById('search-bar').value.toLowerCase();
+            container.innerHTML = '';
+
+            let root = { type: 'directory', name: '/', fullPath: '/', children: {} };
+            
+            Object.keys(window.vfs).sort().forEach(path => {
+                if (searchFilter && !path.toLowerCase().includes(searchFilter)) return;
+                
+                let segments = path.split('/').filter(s => s);
+                let current = root;
+                let currentPathString = '';
+
+                segments.forEach((seg, index) => {
+                    currentPathString += '/' + seg;
+                    const isLast = index === segments.length - 1;
+                    
+                    if (!current.children[seg]) {
+                        current.children[seg] = {
+                            type: isLast ? 'file' : 'directory',
+                            name: seg,
+                            fullPath: isLast ? path : currentPathString + '/',
+                            children: {}
+                        };
+                    }
+                    current = current.children[seg];
+                });
+            });
+
+            renderTreeNode(container, root, 0);
+        }
+
+        function renderTreeNode(parentElement, node, depth) {
+            if (node.name !== '/') {
+                const nodeId = 'menu-' + btoa(node.fullPath).replace(/=/g, '');
+                const row = document.createElement('div');
+                row.className = 'tree-row';
+                
+                const meta = document.createElement('div');
+                meta.className = 'node-meta';
+                
+                for (let i = 1; i < depth; i++) {
+                    const line = document.createElement('span');
+                    line.className = 'node-indent';
+                    meta.appendChild(line);
+                }
+
+                const toggle = document.createElement('span');
+                toggle.className = 'node-toggle';
+                if (node.type === 'directory') {
+                    const isOpen = window.expandedFolders.has(node.fullPath);
+                    toggle.textContent = isOpen ? '[-] ' : '[+] ';
+                    toggle.onclick = (e) => {
+                        e.stopPropagation();
+                        if (isOpen) window.expandedFolders.delete(node.fullPath);
+                        else window.expandedFolders.add(node.fullPath);
+                        renderTree();
+                    };
+                } else {
+                    toggle.textContent = ' .  ';
+                }
+                meta.appendChild(toggle);
+
+                const icon = document.createElement('span');
+                icon.className = 'node-icon';
+                if (node.type === 'directory') {
+                    icon.textContent = '[D] ';
+                } else {
+                    if (node.fullPath.endsWith('.html')) icon.textContent = '[HTML] ';
+                    else if (node.fullPath.endsWith('.json')) icon.textContent = '[CONF] ';
+                    else icon.textContent = '[TXT] ';
+                }
+                meta.appendChild(icon);
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'node-name';
+                nameSpan.textContent = node.name;
+                if(node.type === 'file') {
+                    nameSpan.style.color = node.fullPath.endsWith('.html') ? '#60a5fa' : '#9ca3af';
+                } else {
+                    nameSpan.style.fontWeight = 'bold';
+                    nameSpan.style.color = '#e5e7eb';
+                }
+                meta.appendChild(nameSpan);
+                
+                row.onclick = () => {
+                    if (node.type === 'file') openFile(node.fullPath);
+                    else {
+                        const isOpen = window.expandedFolders.has(node.fullPath);
+                        if (isOpen) window.expandedFolders.delete(node.fullPath);
+                        else window.expandedFolders.add(node.fullPath);
+                        renderTree();
+                    }
+                };
+                row.appendChild(meta);
+
+                const actions = document.createElement('div');
+                actions.className = 'node-actions';
+                
+                if (node.fullPath.endsWith('.html')) {
+                    const pinBtn = document.createElement('button');
+                    const isPinned = window.pinnedUtilities.has(node.fullPath) || node.fullPath.startsWith('/bin/');
+                    pinBtn.className = 'action-btn' + (isPinned ? ' active-pin' : '');
+                    pinBtn.textContent = isPinned ? '[*]' : '[ ]';
+                    if(!node.fullPath.startsWith('/bin/')) {
+                        pinBtn.onclick = (e) => {
+                            e.stopPropagation();
+                            if(window.pinnedUtilities.has(node.fullPath)) window.pinnedUtilities.delete(node.fullPath);
+                            else window.pinnedUtilities.add(node.fullPath);
+                            renderTree();
+                        };
+                    }
+                    actions.appendChild(pinBtn);
+                }
+
+                const ctxTrigger = document.createElement('button');
+                ctxTrigger.className = 'action-btn';
+                ctxTrigger.textContent = '[Run]';
+                ctxTrigger.onclick = (e) => toggleContextDropdown(e, nodeId);
+                actions.appendChild(ctxTrigger);
+
+                const trash = document.createElement('button');
+                trash.className = 'action-btn';
+                trash.textContent = '[Del]';
+                trash.onclick = (e) => {
+                    e.stopPropagation();
+                    if(confirm(`Erase VFS element address node reference: ${node.fullPath}?`)) {
+                        if(node.type === 'file') delete window.vfs[node.fullPath];
+                        else {
+                            Object.keys(window.vfs).forEach(k => {
+                                if(k.startsWith(node.fullPath)) delete window.vfs[k];
+                            });
+                        }
+                        renderTree();
+                    }
+                };
+                actions.appendChild(trash);
+
+                const dropdown = document.createElement('div');
+                dropdown.className = 'ctx-dropdown';
+                dropdown.id = nodeId;
+                dropdown.innerHTML = `<div class="ctx-header">Execute Targeted Utility</div>`;
+                
+                if(node.fullPath.endsWith('.html')) {
+                    const selfLaunch = document.createElement('button');
+                    selfLaunch.className = 'ctx-item';
+                    selfLaunch.style.color = '#10b981';
+                    selfLaunch.textContent = `> Launch Standalone Frame`;
+                    selfLaunch.onclick = (e) => { e.stopPropagation(); launchApp(node.fullPath); };
+                    dropdown.appendChild(selfLaunch);
+                }
+
+                let apps = getGlobalUtilities();
+                if(apps.length === 0) {
+                    dropdown.innerHTML += `<div style="padding:6px 12px; font-size:11px; color:var(--text-muted);">No Starred Utilities Configured</div>`;
+                } else {
+                    apps.forEach(appPath => {
+                        const appItem = document.createElement('button');
+                        appItem.className = 'ctx-item';
+                        appItem.textContent = `> ${appPath.split('/').pop()}`;
+                        appItem.onclick = (e) => {
+                            e.stopPropagation();
+                            let targetDir = node.type === 'file' ? node.fullPath.substring(0, node.fullPath.lastIndexOf('/') + 1) : node.fullPath;
+                            let targetFile = node.type === 'file' ? node.fullPath : null;
+                            launchApp(appPath, targetDir, targetFile);
+                        };
+                        dropdown.appendChild(appItem);
+                    });
+                }
+                actions.appendChild(dropdown);
+                row.appendChild(actions);
+
+                parentElement.appendChild(row);
+            }
+
+            if (node.name === '/' || window.expandedFolders.has(node.fullPath)) {
+                const childrenContainer = document.createElement('div');
+                childrenContainer.className = 'tree-node';
+                parentElement.appendChild(childrenContainer);
+                
+                Object.keys(node.children).sort().forEach(key => {
+                    renderTreeNode(childrenContainer, node.children[key], depth + 1);
+                });
+            }
+        }
+
+        function createNewFile() {
+            const name = prompt("Assign new structure storage key name pointer path:", "/bin/editor.html");
+            if (name) {
+                let cleanPath = name.startsWith('/') ? name : '/' + name;
+                window.vfs[cleanPath] = cleanPath.endsWith('.html') ? "<h1>New Application Script Structure Container</h1>" : "";
+                
+                let parts = cleanPath.split('/');
+                let trace = '/';
+                for(let i=0; i<parts.length-1; i++) {
+                    if(parts[i]) { trace += parts[i] + '/'; window.expandedFolders.add(trace); }
+                }
+                
+                renderTree();
+                openFile(cleanPath);
+            }
+        }
+
+        function openFile(path) {
+            currentActiveFile = path;
+            document.getElementById('file-label').textContent = `Editing Object Node Array Target: ${path}`;
+            document.getElementById('code-editor').value = window.vfs[path];
+            switchTab('editor');
+        }
+
+        document.getElementById('code-editor').addEventListener('input', (e) => {
+            if (currentActiveFile) {
+                window.vfs[currentActiveFile] = e.target.value;
+                const status = document.getElementById('save-status');
+                status.style.display = 'inline';
+                clearTimeout(window.saveTimer);
+                window.saveTimer = setTimeout(() => { status.style.display = 'none'; }, 1000);
+            }
+        });
+
+        const dropZone = document.getElementById('import-zone');
+        document.body.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.style.background = "var(--panel-light)"; });
+        document.body.addEventListener('dragleave', () => dropZone.style.background = "var(--panel)");
+        document.body.addEventListener('drop', async (e) => {
+            e.preventDefault(); dropZone.style.background = "var(--panel)";
+            if(e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+        });
+        document.getElementById('file-input').addEventListener('change', (e) => handleFiles(e.target.files));
+
+
+	// =====================================================================
+	// LABYOS CORE EXPORT ROUTINE (COMPRESSES ACTIVE MEMORY TO DISK ZIP)
+	// =====================================================================
+	async function exportVFS_to_Zip() {
+	    const keys = Object.keys(window.vfs);
+	    if (keys.length === 0) {
+		alert("Export Blocked: The current virtual file system map is completely empty!");
+		return;
+	    }
+
+	    logToConsole('sys', `Initializing export pipeline... Compressing ${keys.length} workspace files.`);
+	    
+	    try {
+		const zip = new JSZip();
+
+		// Loop through every file node in your storage registry
+		keys.forEach(path => {
+		    // Strip the leading absolute root slash '/' so the folder structures inside 
+		    // the generated zip archive compile correctly without breaking Windows/Unix unzippers
+		    let cleanZipPath = path.startsWith('/') ? path.substring(1) : path;
+		    
+		    // Pack the text payload directly into the target structural path vector
+		    zip.file(cleanZipPath, window.vfs[path]);
+		});
+
+		// Generate the compressed blob data stream asynchronously
+		logToConsole('sys', 'Packing data blocks into baseline compressed binary matrix...');
+		const contentBlob = await zip.generateAsync({ type: "blob" });
+
+		// Trigger native download anchor handshake layer
+		const link = document.createElement('a');
+		link.download = "labyos_workspace_backup.zip";
+		const blobUrl = URL.createObjectURL(contentBlob);
+		link.href = blobUrl;
+		link.click();
+
+		// Memory leak guard: Clean up object reference from the browser
+		setTimeout(() => URL.revokeObjectURL(blobUrl), 10000);
+		logToConsole('sys', 'Export successful! Compressed archive committed to machine downloads.');
+
+	    } catch (err) {
+		logToConsole('err', `Export Pipeline Fault Encountered: ${err.message}`);
+		alert("Kernel Zip Export Error: See OS Console log for traceback strings.");
+	    }
+	}
+
+
+
+        async function handleFiles(files) {
+            for (let file of files) {
+                if (file.name.endsWith('.zip')) {
+                    logToConsole('sys', `Decompressing input payload container maps: ${file.name}...`);
+                    try {
+                        const zip = await JSZip.loadAsync(file);
+                        const promises = [];
+                        zip.forEach((relativePath, zipEntry) => {
+                            if (!zipEntry.dir) {
+                                promises.push(zipEntry.async("text").then(content => {
+                                    window.vfs['/' + relativePath] = content;
+                                }));
+                            }
+                        });
+                        await Promise.all(promises);
+                        logToConsole('sys', `Extraction routine synchronized cleanly to local VFS storage grids.`);
+                    } catch (err) { logToConsole('err', `Archive mounting exception caught: ${err.message}`); }
+                } else {
+                    const reader = new FileReader();
+                    reader.onload = (e) => { window.vfs['/' + file.name] = e.target.result; renderTree(); };
+                    reader.readAsText(file);
+                }
+            }
+            renderTree();
+        }
+
+        function resolveVirtualPath(basePath, relativePath) {
+            if (!relativePath || relativePath.startsWith('http') || relativePath.startsWith('//') || relativePath.startsWith('data:') || relativePath.startsWith('blob:')) return null; 
+            if (relativePath.startsWith('/')) { basePath = '/'; }
+            let baseParts = basePath.split('/').slice(0, -1);
+            let combined = baseParts.concat(relativePath.split('/'));
+            let resultStack = [];
+            for (let part of combined) {
+                if (part === '' || part === '.') continue;
+                if (part === '..') { if (resultStack.length > 0) resultStack.pop(); } 
+                else { resultStack.push(part); }
+            }
+            return '/' + resultStack.join('/');
+        }
+
+        window.updateParentVFSUI = renderTree;
+
+        function bootIframe(entryPath, targetIframeId, workingDir, targetFilePath = null) {
+            if (!entryPath || window.vfs[entryPath] === undefined) {
+                logToConsole('err', `System Boot Fault: Missing core record pointer: ${entryPath}`);
+                return;
+            }
+
+            let html = window.vfs[entryPath];
+
+            const interceptor = `
+                <script>
+                    window.__VFS_PROGRAM_PATH__ = "${entryPath}";
+                    window.__VFS_CURRENT_DIR__ = "${workingDir}"; 
+                    window.__VFS_TARGET_FILE__ = ${targetFilePath ? `"${targetFilePath}"` : 'null'};
+                    window.__VFS_MAP__ = parent.vfs || {};
+                    window.__VFS_RESOLVER__ = ${resolveVirtualPath.toString()};
+
+                    window.file_save = function(get_cd, getFileName, getData) {
+                        let contextDir = get_cd || window.__VFS_CURRENT_DIR__;
+                        let target = window.__VFS_RESOLVER__(contextDir, getFileName);
+                        if (target) {
+                            window.__VFS_MAP__[target] = getData;
+                            window.parent.postMessage({type: 'sys', msg: 'Core IO Synchronized -> ' + target}, '*');
+                            if(window.parent.updateParentVFSUI) window.parent.updateParentVFSUI();
+                        }
+                    };
+
+                    window.file_load = function(get_cd, getFileName) {
+                        let contextDir = get_cd || window.__VFS_CURRENT_DIR__;
+                        let target = window.__VFS_RESOLVER__(contextDir, getFileName);
+                        if (target && window.__VFS_MAP__[target] !== undefined) return window.__VFS_MAP__[target];
+                        return null;
+                    };
+
+                    window.file_remove = function(get_cd, getFileName) {
+                        let contextDir = get_cd || window.__VFS_CURRENT_DIR__;
+                        let target = window.__VFS_RESOLVER__(contextDir, getFileName);
+                        if (target && window.__VFS_MAP__[target] !== undefined) {
+                            delete window.__VFS_MAP__[target];
+                            window.parent.postMessage({type: 'sys', msg: 'Core IO Unlinked -> ' + target}, '*');
+                            if(window.parent.updateParentVFSUI) window.parent.updateParentVFSUI();
+                        }
+                    };
+
+                    window.file_dir = function(get_cd, dir_name) {
+                        let contextDir = get_cd || window.__VFS_CURRENT_DIR__;
+                        let targetDir = window.__VFS_RESOLVER__(contextDir, dir_name || "");
+                        if (!targetDir.endsWith('/')) targetDir += '/';
+                        let results = [];
+                        Object.keys(window.__VFS_MAP__).forEach(path => {
+                            if (path.startsWith(targetDir)) results.push(path.replace(targetDir, ''));
+                        });
+                        return results.length > 0 ? results : null;
+                    };
+
+                    window.file_log = function(msg) { console.log(msg); };
+                    window.file_js_cd = function() { return window.__VFS_CURRENT_DIR__; };
+
+                    window.onerror = (msg, url, line) => { window.parent.postMessage({type: 'err', msg: msg + ' (Line ' + line + ')'}, '*'); return false; };
+                    const ogLog = console.log;
+                    console.log = (...args) => { 
+                        window.parent.postMessage({type: 'log', msg: args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}, '*'); 
+                        ogLog.apply(console, args); 
+                    };
+
+                    const scriptProto = HTMLScriptElement.prototype;
+                    const srcDescriptor = Object.getOwnPropertyDescriptor(scriptProto, 'src');
+                    Object.defineProperty(scriptProto, 'src', {
+                        get: function() { return this.hasAttribute('data-vfs-path') ? window.location.origin + this.getAttribute('data-vfs-path') : srcDescriptor.get.call(this); },
+                        set: function(rawPath) {
+                            if (!rawPath || typeof rawPath !== 'string') { srcDescriptor.set.call(this, rawPath); return; }
+                            let cleanPath = rawPath.startsWith(window.location.origin) ? rawPath.substring(window.location.origin.length) : rawPath;
+                            if (cleanPath.startsWith('blob:') || cleanPath.startsWith('data:')) { srcDescriptor.set.call(this, rawPath); return; }
+                            
+                            let solved = window.__VFS_RESOLVER__(window.__VFS_PROGRAM_PATH__, cleanPath);
+                            if (solved && window.__VFS_MAP__[solved] !== undefined) {
+                                this.setAttribute('data-vfs-path', solved);
+                                let blobUrl = URL.createObjectURL(new Blob([window.__VFS_MAP__[solved]], { type: 'application/javascript' }));
+                                srcDescriptor.set.call(this, blobUrl);
+                            } else { srcDescriptor.set.call(this, rawPath); }
+                        }
+                    });
+                <\/script>
+            `;
+            html = html.replace(/<head>/i, '<head>' + interceptor);
+
+            let resolvedStaticPaths = new Set();
+            const tagRegex = /(src|href)=["']([^"']+)["']/gi;
+            html = html.replace(tagRegex, (match, attribute, rawPath) => {
+                let solvedPath = resolveVirtualPath(entryPath, rawPath);
+                if (!solvedPath || window.vfs[solvedPath] === undefined) return match; 
+
+                if (attribute.toLowerCase() === 'src' && resolvedStaticPaths.has(solvedPath)) {
+                    return `src="data:text/javascript," data-vfs-dup-prevented="${solvedPath}"`;
+                }
+                if (attribute.toLowerCase() === 'src') resolvedStaticPaths.add(solvedPath);
+
+                let mime = solvedPath.endsWith('.js') ? 'application/javascript' : (solvedPath.endsWith('.css') ? 'text/css' : 'text/plain');
+                let blobUrl = URL.createObjectURL(new Blob([window.vfs[solvedPath]], { type: mime }));
+                return `${attribute}="${blobUrl}" data-vfs-path="${solvedPath}"`;
+            });
+
+            document.getElementById(targetIframeId).src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+        }
+
+        window.addEventListener('message', (e) => {
+            if (e.data && e.data.type) logToConsole(e.data.type, e.data.msg);
+        });
+
+        function logToConsole(type, msg) {
+            const logs = document.getElementById('console-logs');
+            let cls = type === 'err' ? 'class="log-err"' : (type === 'sys' ? 'class="log-sys"' : '');
+            logs.innerHTML += `<div ${cls}>[${type.toUpperCase()}] ${msg}</div>`;
+            logs.scrollTop = logs.scrollHeight;
+        }
+
+        logToConsole('sys', 'Labyrinth Operating System Frame v8.2 Initialized Clean.');
+        renderTree();
+    </script>
+</body>
+</html>
