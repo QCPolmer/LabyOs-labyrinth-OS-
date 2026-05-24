@@ -1,4 +1,5 @@
-This was vibe coded with Gemini, I did not code this personally,
+This was vibe coded with Gemini and Grok, 
+I did not code most of this personally,
 as such I give the model the credit. 
 
 This was made in less than a week, and as such hasn't been 
