@@ -80,6 +80,110 @@
         #console-logs { padding: 12px; overflow-y: auto; font-size: 12px; color: #a5d6ff; flex-grow: 1; background: #050507; }
         .log-err { color: #ef4444; }
         .log-sys { color: var(--success); }
+
+	/* === TOUCH / MOBILE FRIENDLY HOVER FIX === */
+@media (hover: hover) and (pointer: fine) {
+    /* Only apply hover on real mouse devices */
+    .tree-row:hover,
+    .tab-btn:hover,
+    .action-btn:hover,
+    .btn-ctrl:hover,
+    .btn-primary:hover {
+        /* your existing hover styles stay here */
+    }
+}
+
+/* Touch-friendly fallbacks */
+.tree-row:active,
+.tab-btn:active,
+.action-btn:active,
+.btn-ctrl:active,
+.btn-primary:active {
+    background: rgba(255,255,255,0.08) !important;
+    color: #fff !important;
+    transform: scale(0.98);
+    transition: all 0.1s;
+}
+
+/* Make action buttons easier to tap */
+.node-actions {
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.tree-row:hover .node-actions,
+.tree-row:active .node-actions {
+    opacity: 1;
+}
+
+/* Slightly larger touch targets */
+.action-btn, .btn-ctrl, .close-tab {
+    padding: 6px 8px;
+    min-width: 36px;
+    min-height: 36px;
+}
+/* === ACTION BUTTONS - MOBILE FRIENDLY === */
+.node-actions {
+    display: flex !important;           /* Always show on all devices */
+    opacity: 0.75;
+    transition: opacity 0.2s ease;
+    gap: 2px;
+}
+
+.tree-row:hover .node-actions,
+.tree-row:active .node-actions {
+    opacity: 1;
+}
+
+/* Make them even more touch-friendly */
+.action-btn {
+    padding: 6px 9px;
+    font-size: 12px;
+    min-width: 38px;
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Optional: Slightly smaller on very small screens */
+@media (max-width: 768px) {
+    .action-btn {
+        padding: 5px 7px;
+        min-width: 34px;
+        min-height: 34px;
+        font-size: 11px;
+    }
+    
+    .node-actions {
+        gap: 1px;
+    }
+}
+/* STRONG DROPDOWN MASKING */
+.node-actions {
+    position: relative;
+    z-index: 10;
+}
+
+.ctx-dropdown {
+    position: absolute;
+    right: 0;
+    top: 100%;
+    z-index: 10000 !important;
+    pointer-events: auto;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.6);
+}
+
+/* Block clicks from reaching the row */
+.node-actions,
+.node-actions * {
+    pointer-events: auto;
+}
+
+.ctx-dropdown,
+.ctx-dropdown * {
+    pointer-events: auto;
+}
     </style>
 </head>
 <body>
@@ -102,6 +206,18 @@
 		    <button class="btn-primary" style="background:#374151;" onclick="createNewFile()">[+ New File]</button>
 		    <button class="btn-primary" style="background:#b45309;" onclick="runArbitraryPath()">[Custom Boot]</button>
 		    <button class="btn-primary" style="background:#4b5563;" onclick="toggleDocs()">[Kernel API]</button>
+
+		    <button class="btn-primary" style="background:#10b981;" onclick="saveToBrowser()">
+		       ?? Save to Browser
+		     </button>
+
+		     <button class="btn-primary" style="background:#3b82f6;" onclick="loadFromBrowser()">
+		       ?? Load Backup
+		     </button>
+
+		     <button class="btn-primary" style="background:#854d0e;" onclick="clearBrowserSave()">
+		       ??? Clear Browser Save
+		    </button>
 		</div>
                 
                 <div id="context-bar">
@@ -143,6 +259,80 @@
     </div>
 
     <script>
+
+// === SIMPLE MANUAL BROWSER BACKUP ===
+const DB_NAME = 'LabyOS_VFS';
+const STORE_NAME = 'files';
+let db = null;
+
+function initSimpleDB() {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onupgradeneeded = (e) => {
+        db = e.target.result;
+        if (!db.objectStoreNames.contains(STORE_NAME)) {
+            db.createObjectStore(STORE_NAME);
+        }
+    };
+    request.onsuccess = (e) => { db = e.target.result; };
+    request.onerror = () => console.warn("Manual backup DB failed to init");
+}
+
+async function saveToBrowser() {
+    if (!db) return alert("Browser storage not ready.");
+    
+    try {
+        const tx = db.transaction(STORE_NAME, 'readwrite');
+        const store = tx.objectStore(STORE_NAME);
+        store.put({ timestamp: Date.now(), data: {...window.vfs} }, 'currentVFS');
+        
+        logToConsole('sys', '?? Manually saved to browser storage.');
+        alert("? Saved to browser successfully!");
+    } catch(e) {
+        alert("Save failed: " + e.message);
+    }
+}
+
+async function loadFromBrowser() {
+    if (!db) return alert("Browser storage not ready.");
+    
+    try {
+        const tx = db.transaction(STORE_NAME, 'readonly');
+        const store = tx.objectStore(STORE_NAME);
+        const req = store.get('currentVFS');
+        
+        req.onsuccess = () => {
+            if (req.result?.data) {
+                window.vfs = { ...req.result.data };
+                renderTree();
+                logToConsole('sys', '? Loaded backup from browser storage.');
+                alert("? Restored from browser backup!");
+            } else {
+                alert("No saved backup found.");
+            }
+        };
+    } catch(e) {
+        alert("Load failed.");
+    }
+}
+
+function clearBrowserSave() {
+    if (!db || !confirm("Delete ALL saved browser data for LabyOS?")) return;
+    
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    tx.objectStore(STORE_NAME).delete('currentVFS');
+    logToConsole('sys', 'Browser backup cleared.');
+    alert("Browser backup cleared.");
+}
+
+// Initialize
+initSimpleDB();
+
+// Expose buttons
+window.saveToBrowser = saveToBrowser;
+window.loadFromBrowser = loadFromBrowser;
+window.clearBrowserSave = clearBrowserSave;
+
+
         /* DECOUPLED PLAIN CONFIGURATION ARRAYS FOR EASY MAINTENANCE */
 	// NOTE: feel free to put in 'placeholder' or whatever if 
 	// doing another full draft: this can be added at end to 
@@ -316,7 +506,8 @@ utilize the injected environment variables during your app's boot sequence:
         function getGlobalUtilities() {
             let utils = [];
             Object.keys(window.vfs).forEach(path => {
-                if(path.startsWith('/bin/') && path.endsWith('.html')) {
+                if( path.indexOf("bin.") !=-1 ||
+		  (path.startsWith('/bin/') && path.endsWith('.html'))) {
                     utils.push(path);
                 }
             });
@@ -328,66 +519,92 @@ utilize the injected environment variables during your app's boot sequence:
             return utils;
         }
 
-        function launchApp(path, forcedContextDir = null, targetFilePath = null) {
-            appInstanceCount++;
-            const appId = 'app-' + appInstanceCount;
-            const shortName = path.split('/').pop();
-            
-            let workingDir = forcedContextDir || window.currentContextDir;
-            if (!workingDir.endsWith('/')) workingDir += '/';
-            if (!workingDir.startsWith('/')) workingDir = '/' + workingDir;
-
-            window.runningApps[appId] = { path: path, workingDir: workingDir, targetFilePath: targetFilePath };
-
-            const nav = document.getElementById('tab-nav');
-            const btn = document.createElement('button');
-            btn.className = 'tab-btn';
-            btn.id = 'tab-btn-' + appId;
-            btn.innerHTML = `[Run] ${shortName} <span class="close-tab" onclick="closeApp('${appId}', event)">x</span>`;
-            btn.onclick = () => switchTab(appId);
-            nav.appendChild(btn);
-
-            const workArea = document.getElementById('work-area');
-            const content = document.createElement('div');
-            content.className = 'tab-content';
-            content.id = 'tab-' + appId;
-            
-            const statusBar = document.createElement('div');
-            statusBar.className = 'app-status-bar';
-            statusBar.id = 'status-bar-' + appId;
-            
-            let contextLabel = `[Dir] ${workingDir}`;
-            if (targetFilePath) {
-                contextLabel += ` | [Focus File] ${targetFilePath}`;
-            }
-
-            statusBar.innerHTML = `
-                <span><strong>Bin:</strong> ${path} | ${contextLabel}</span>
-                <div>
-                    <button class="btn-primary" style="margin:0 4px 0 0; padding:3px 8px; font-size:11px; background:#4b5563;" onclick="reloadApp('${appId}')">[Reload]</button>
-                    <button class="btn-primary" style="margin:0; padding:3px 8px; font-size:11px; background:var(--purple);" onclick="changeAppContext('${appId}')">[Shift Context]</button>
-                </div>
-            `;
-            
-            const iframe = document.createElement('iframe');
-            iframe.id = 'frame-' + appId;
-            iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
-            
-            content.appendChild(statusBar);
-            content.appendChild(iframe);
-            workArea.appendChild(content);
-
-            switchTab(appId);
-            bootIframe(path, iframe.id, workingDir, targetFilePath);
+function launchApp(path, forcedContextDir = null, targetFilePath = null) {
+    appInstanceCount++;
+    const appId = 'app-' + appInstanceCount;
+    const shortName = path.split('/').pop();
+    
+    let workingDir = forcedContextDir;
+    
+    if (!workingDir) {
+        if (path.lastIndexOf('/') > 0) {
+            workingDir = path.substring(0, path.lastIndexOf('/') + 1);
+        } else {
+            workingDir = '/';
         }
+    }
+    
+    if (!workingDir.endsWith('/')) workingDir += '/';
+    if (!workingDir.startsWith('/')) workingDir = '/' + workingDir;
 
-        function closeApp(appId, event) {
-            event.stopPropagation();
-            document.getElementById('tab-btn-' + appId).remove();
-            document.getElementById('tab-' + appId).remove();
-            delete window.runningApps[appId];
-            switchTab('files');
-        }
+    // --- SHADOW COPY REMOVED ---
+    // Let the environment variables handle the context shift natively.
+    const launchPath = path;
+
+    window.runningApps[appId] = { 
+        path: launchPath,
+        originalPath: path,
+        workingDir: workingDir, 
+        targetFilePath: targetFilePath,
+        isTemp: false 
+    };
+
+    // === Rest of your tab creation code (unchanged) ===
+    const nav = document.getElementById('tab-nav');
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn';
+    btn.id = 'tab-btn-' + appId;
+    btn.innerHTML = `[Run] ${shortName} <span class="close-tab" onclick="closeApp('${appId}', event)">x</span>`;
+    btn.onclick = () => switchTab(appId);
+    nav.appendChild(btn);
+
+    const workArea = document.getElementById('work-area');
+    const content = document.createElement('div');
+    content.className = 'tab-content';
+    content.id = 'tab-' + appId;
+    
+    const statusBar = document.createElement('div');
+    statusBar.className = 'app-status-bar';
+    statusBar.innerHTML = `
+        <span><strong>Bin:</strong> ${path} | [Dir] ${workingDir}</span>
+        <div>
+            <button class="btn-primary" style="margin:0 4px 0 0; padding:3px 8px; font-size:11px; background:#4b5563;" 
+                    onclick="reloadApp('${appId}')">[Reload]</button>
+            <button class="btn-primary" style="margin:0; padding:3px 8px; font-size:11px; background:var(--purple);" 
+                    onclick="changeAppContext('${appId}')">[Shift Context]</button>
+        </div>
+    `;
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'frame-' + appId;
+    iframe.setAttribute('sandbox', 'allow-scripts allow-same-origin');
+
+    content.appendChild(statusBar);
+    content.appendChild(iframe);
+    workArea.appendChild(content);
+
+    switchTab(appId);
+    bootIframe(launchPath, iframe.id, workingDir, targetFilePath);
+}
+       function closeApp(appId, event) {
+	    event.stopPropagation();
+	    
+	    const config = window.runningApps[appId];
+	    if (config && config.isTemp) {
+		delete window.vfs[config.path];        // cleanup temp file
+	    }
+
+	    document.getElementById('tab-btn-' + appId)?.remove();
+	    document.getElementById('tab-' + appId)?.remove();
+	    delete window.runningApps[appId];
+	    
+	    // Refresh the tree so temp files disappear immediately
+	    if (typeof renderTree === 'function') {
+		renderTree();
+	    }
+	    
+	    switchTab('files');
+	}
 
         function reloadApp(appId) {
             const config = window.runningApps[appId];
@@ -417,26 +634,31 @@ utilize the injected environment variables during your app's boot sequence:
         }
 
         function toggleContextDropdown(e, menuId) {
-            e.stopPropagation();
-            const openMenu = document.getElementById(menuId);
-            const shouldOpen = openMenu.style.display !== 'block';
-            
-            document.querySelectorAll('.ctx-dropdown').forEach(el => el.style.display = 'none');
-            
-            if (shouldOpen) {
-                openMenu.style.display = 'block';
-                activeOpenMenuId = menuId;
-            } else {
-                activeOpenMenuId = null;
-            }
-        }
+	    e.stopImmediatePropagation();
+	    e.preventDefault();
 
-        document.addEventListener('click', () => {
-            if (activeOpenMenuId) {
-                document.getElementById(activeOpenMenuId).style.display = 'none';
-                activeOpenMenuId = null;
-            }
-        });
+	    const dropdown = document.getElementById(menuId);
+	    if (!dropdown) return;
+
+	    const shouldOpen = dropdown.style.display !== 'block';
+
+	    // 1. Close all others and reset their parent's z-index back to normal
+	    document.querySelectorAll('.ctx-dropdown').forEach(el => {
+		el.style.display = 'none';
+		if (el.parentElement) {
+		    el.parentElement.style.zIndex = '10'; 
+		}
+	    });
+
+	    if (shouldOpen) {
+		// 2. Open this dropdown and blast its parent to the top of the stacking context
+		dropdown.style.display = 'block';
+		dropdown.parentElement.style.zIndex = '9999'; 
+		activeOpenMenuId = menuId;
+	    } else {
+		activeOpenMenuId = null;
+	    }
+	}
 
         function renderTree() {
             const container = document.getElementById('tree-container');
@@ -524,15 +746,26 @@ utilize the injected environment variables during your app's boot sequence:
                 }
                 meta.appendChild(nameSpan);
                 
-                row.onclick = () => {
-                    if (node.type === 'file') openFile(node.fullPath);
-                    else {
-                        const isOpen = window.expandedFolders.has(node.fullPath);
-                        if (isOpen) window.expandedFolders.delete(node.fullPath);
-                        else window.expandedFolders.add(node.fullPath);
-                        renderTree();
-                    }
-                };
+               row.onclick = (e) => {
+		    // Strong masking: ignore row click for anything in actions or dropdown
+		    if (e.target.closest('.node-actions') || 
+			e.target.closest('.ctx-dropdown') || 
+			e.target.classList.contains('ctx-item') ||
+			e.target.classList.contains('action-btn')) {
+			
+			e.stopImmediatePropagation();   // Stronger than stopPropagation
+			return;
+		    }
+
+		    if (node.type === 'file') {
+			openFile(node.fullPath);
+		    } else {
+			const isOpen = window.expandedFolders.has(node.fullPath);
+			if (isOpen) window.expandedFolders.delete(node.fullPath);
+			else window.expandedFolders.add(node.fullPath);
+			renderTree();
+		    }
+		};
                 row.appendChild(meta);
 
                 const actions = document.createElement('div');
@@ -563,7 +796,7 @@ utilize the injected environment variables during your app's boot sequence:
                 const trash = document.createElement('button');
                 trash.className = 'action-btn';
                 trash.textContent = '[Del]';
-                trash.onclick = (e) => {
+                trash.onmousedown = (e) => {
                     e.stopPropagation();
                     if(confirm(`Erase VFS element address node reference: ${node.fullPath}?`)) {
                         if(node.type === 'file') delete window.vfs[node.fullPath];
@@ -581,33 +814,51 @@ utilize the injected environment variables during your app's boot sequence:
                 dropdown.className = 'ctx-dropdown';
                 dropdown.id = nodeId;
                 dropdown.innerHTML = `<div class="ctx-header">Execute Targeted Utility</div>`;
-                
-                if(node.fullPath.endsWith('.html')) {
+
+                // === Launch Standalone Frame ===
+                if (node.fullPath.endsWith('.html')) {
                     const selfLaunch = document.createElement('button');
                     selfLaunch.className = 'ctx-item';
                     selfLaunch.style.color = '#10b981';
                     selfLaunch.textContent = `> Launch Standalone Frame`;
-                    selfLaunch.onclick = (e) => { e.stopPropagation(); launchApp(node.fullPath); };
+                    selfLaunch.onclick = (e) => {
+                        e.stopImmediatePropagation();
+                        e.preventDefault();
+                        launchApp(node.fullPath);   // Direct call
+                    };
                     dropdown.appendChild(selfLaunch);
                 }
 
-                let apps = getGlobalUtilities();
-                if(apps.length === 0) {
-                    dropdown.innerHTML += `<div style="padding:6px 12px; font-size:11px; color:var(--text-muted);">No Starred Utilities Configured</div>`;
-                } else {
-                    apps.forEach(appPath => {
-                        const appItem = document.createElement('button');
-                        appItem.className = 'ctx-item';
-                        appItem.textContent = `> ${appPath.split('/').pop()}`;
-                        appItem.onclick = (e) => {
-                            e.stopPropagation();
-                            let targetDir = node.type === 'file' ? node.fullPath.substring(0, node.fullPath.lastIndexOf('/') + 1) : node.fullPath;
-                            let targetFile = node.type === 'file' ? node.fullPath : null;
-                            launchApp(appPath, targetDir, targetFile);
-                        };
-                        dropdown.appendChild(appItem);
-                    });
-                }
+                // === Utility Apps ===
+		let apps = getGlobalUtilities();
+		if (apps.length === 0) {
+		    // ... (keep no-utils block)
+		} else {
+		    apps.forEach(appPath => {
+			const appItem = document.createElement('button');
+			appItem.className = 'ctx-item';
+			appItem.textContent = `> ${appPath.split('/').pop()}`;
+			
+			// Swapped to onmousedown to beat the CSS layout shift
+			appItem.onmousedown = (e) => {
+			    console.log("App Triggered:", appPath);
+			    e.stopImmediatePropagation();
+			    e.preventDefault();
+			    
+			    let targetDir = node.type === 'file' 
+				? node.fullPath.substring(0, node.fullPath.lastIndexOf('/') + 1) 
+				: node.fullPath;
+			    let targetFile = node.type === 'file' ? node.fullPath : null;
+			    
+			    launchApp(appPath, targetDir, targetFile);
+			    
+			    // Force close menu
+			    document.querySelectorAll('.ctx-dropdown').forEach(el => el.style.display = 'none');
+			};
+			dropdown.appendChild(appItem);
+		    });
+		}
+
                 actions.appendChild(dropdown);
                 row.appendChild(actions);
 
@@ -669,6 +920,25 @@ utilize the injected environment variables during your app's boot sequence:
         document.getElementById('file-input').addEventListener('change', (e) => handleFiles(e.target.files));
 
 
+	// --- DEBUG SHIM INJECTION ---
+(function() {
+    // 1. Hook console.log
+    const _old_log = console.log;
+    console.log = function(...args) {
+        // Log to our own visible debug area in the parent
+        window.parent.document.getElementById('console-logs').innerHTML += 
+            `<div class="log-sys">[CONSOLE] ${args.join(' ')}</div>`;
+        _old_log.apply(console, args);
+    };
+
+    // 2. Hook file_log (The engine's specific logger)
+    // If it's already defined, override it. If not, create it.
+    window.file_log = function(msg) {
+        window.parent.document.getElementById('console-logs').innerHTML += 
+            `<div class="log-sys">[ENGINE_LOG] ${msg}</div>`;
+    };
+    
+})();
 	// =====================================================================
 	// LABYOS CORE EXPORT ROUTINE (COMPRESSES ACTIVE MEMORY TO DISK ZIP)
 	// =====================================================================
@@ -767,15 +1037,106 @@ utilize the injected environment variables during your app's boot sequence:
 
             let html = window.vfs[entryPath];
 
-            const interceptor = `
+const interceptor = `
                 <script>
+                    // 1. Unified Global Hooks (No more silent failures)
+                    window.file_log = function(msg) {
+                        window.parent.postMessage({type: 'sys', msg: '[ENGINE] ' + msg}, '*');
+                    };
+                    
+                    const ogLog = console.log;
+                    console.log = (...args) => { 
+                        window.parent.postMessage({type: 'log', msg: args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}, '*'); 
+                        ogLog.apply(console, args); 
+                    };
+                    
+                    window.onerror = (msg, url, line) => { 
+                        window.parent.postMessage({type: 'err', msg: msg + ' (Line ' + line + ')'}, '*'); 
+                        return false; 
+                    };
+
+                    window.alert = function(text) {
+                        try { window.parent.alert(text); } catch(e) { console.log("Alert blocked: " + text); }
+                    };
+
+                    window.confirm = function(text) {
+                        try { return window.parent.confirm(text); } catch(e) { return false; }
+                    };
+
+                    window.prompt = function(text, defaultText) {
+                        try { return window.parent.prompt(text, defaultText); } catch(e) { return null; }
+                    };
+
+                    // 2. Core VFS State
                     window.__VFS_PROGRAM_PATH__ = "${entryPath}";
                     window.__VFS_CURRENT_DIR__ = "${workingDir}"; 
-                    window.__VFS_TARGET_FILE__ = ${targetFilePath ? `"${targetFilePath}"` : 'null'};
+                    window.__VFS_TARGET_FILE__ = ${JSON.stringify(targetFilePath || null)};
                     window.__VFS_MAP__ = parent.vfs || {};
                     window.__VFS_RESOLVER__ = ${resolveVirtualPath.toString()};
 
+                    // 3. Consolidated I/O Operations (The Polyglot Bridge)
+                    window.file_load = function(get_cd, getFileName, ignore_embed) {
+                        
+			if(getFileName == "" || getFileName == null){
+				getFileName = get_cd;
+				get_cd = ""; }
+			if(get_cd == "./" || get_cd == null){
+				if(getFileName.indexOf(
+					window.__VFS_CURRENT_DIR__)!=-1){
+				   get_cd = window.__VFS_CURRENT_DIR__;
+				}else{ get_cd = "";}}
+			
+                        let contextDir = get_cd || window.__VFS_CURRENT_DIR__;
+			console.log(contextDir); 
+			console.log( getFileName);
+			
+                        let target = window.__VFS_RESOLVER__(contextDir, getFileName);
+                        window.file_log("DEBUG: Attempting to load " + target);
+
+			// this works now:
+			//console.log();
+
+                        if (target && window.__VFS_MAP__[target] !== undefined) {
+                            return window.__VFS_MAP__[target];
+                        }
+                        window.file_log("ERR: File not found " + target);
+                        return null;
+                    };
+
+                    // Synchronous Execution via eval (No XHR needed for internal VFS)
+                    window.file_load_js = function(get_cd, getFileName) {
+                    	if( Array.isArray(getFileName) ){
+				for(var i=0; i< getFileName.length; i+=1){
+					window.file_load_js(
+					    get_cd, getFileName[i]);}
+				return; }			
+
+			let fileContent = window.file_load(get_cd, getFileName);
+			console.log(fileContent);
+                        if (fileContent) {
+                            try {
+                                return window.eval(fileContent);
+                            } catch(e) {
+                                window.file_log("ERR: Eval failed " + e.message);
+                            }
+                        }
+                        return null;
+                    };
+                    window.file_treeload_js = window.file_load_js; // Alias it so the engine doesn't panic
+                    window.file_load_noembed = window.file_load;
+                    window.file_load_js_noembed = window.file_load_js;
+
                     window.file_save = function(get_cd, getFileName, getData) {
+			
+			if(getFileName == "" || getFileName == null){
+				getFileName = get_cd;
+				get_cd = ""; }
+			if(get_cd == "./" || get_cd == null){
+				if(getFileName.indexOf(
+					window.__VFS_CURRENT_DIR__)!=-1){
+				   get_cd = window.__VFS_CURRENT_DIR__;
+				}else{ get_cd = "";}}
+
                         let contextDir = get_cd || window.__VFS_CURRENT_DIR__;
                         let target = window.__VFS_RESOLVER__(contextDir, getFileName);
                         if (target) {
@@ -783,13 +1144,6 @@ utilize the injected environment variables during your app's boot sequence:
                             window.parent.postMessage({type: 'sys', msg: 'Core IO Synchronized -> ' + target}, '*');
                             if(window.parent.updateParentVFSUI) window.parent.updateParentVFSUI();
                         }
-                    };
-
-                    window.file_load = function(get_cd, getFileName) {
-                        let contextDir = get_cd || window.__VFS_CURRENT_DIR__;
-                        let target = window.__VFS_RESOLVER__(contextDir, getFileName);
-                        if (target && window.__VFS_MAP__[target] !== undefined) return window.__VFS_MAP__[target];
-                        return null;
                     };
 
                     window.file_remove = function(get_cd, getFileName) {
@@ -813,16 +1167,118 @@ utilize the injected environment variables during your app's boot sequence:
                         return results.length > 0 ? results : null;
                     };
 
-                    window.file_log = function(msg) { console.log(msg); };
                     window.file_js_cd = function() { return window.__VFS_CURRENT_DIR__; };
+                    window.file_dir_cd_js = window.file_js_cd;
 
-                    window.onerror = (msg, url, line) => { window.parent.postMessage({type: 'err', msg: msg + ' (Line ' + line + ')'}, '*'); return false; };
-                    const ogLog = console.log;
-                    console.log = (...args) => { 
-                        window.parent.postMessage({type: 'log', msg: args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}, '*'); 
-                        ogLog.apply(console, args); 
+                    window._file_dir_search = function(startFileLoc, maxRecursiveDepth, regex_list) {
+                        let targetDir = window.__VFS_RESOLVER__(window.__VFS_CURRENT_DIR__, startFileLoc);
+                        if (targetDir !== '/' && !targetDir.endsWith('/')) targetDir += '/';
+                        
+                        let matches = Object.keys(window.__VFS_MAP__).filter(k => k.startsWith(targetDir));
+                        
+                        if (maxRecursiveDepth !== undefined && maxRecursiveDepth !== null) {
+                            let baseSegments = targetDir.split('/').filter(Boolean).length;
+                            matches = matches.filter(k => {
+                                let segs = k.split('/').filter(Boolean).length;
+                                return (segs - baseSegments) <= maxRecursiveDepth;
+                            });
+                        }
+
+                        if (regex_list && Array.isArray(regex_list) && regex_list.length > 0) {
+                            let compiledRegexes = regex_list.map(pattern => new RegExp(pattern));
+                            matches = matches.filter(path => compiledRegexes.some(rx => rx.test(path)));
+                        }
+                        return matches;
                     };
 
+                    window.file_dir_search = function(startFileLoc, maxRecursiveDepth, list_of_regex, list_of_exclude_regex) {
+                        let tmpList = window._file_dir_search(startFileLoc, maxRecursiveDepth, list_of_regex);
+                        if (!list_of_exclude_regex) return tmpList; 
+                        
+                        let tmpNotList = window._file_dir_search(startFileLoc, maxRecursiveDepth, list_of_exclude_regex);
+                        return tmpList.filter(item => !tmpNotList.includes(item));
+                    };
+
+
+
+// ====================================================================
+// THE LOW-LEVEL C-BINDING MOCKS
+// This allows unmodified C-Polyglot JS to run natively in the VFS
+// ====================================================================
+
+// 1. The Output / Input Bindings
+window.file_debug_printf = function(msg) {
+    window.parent.postMessage({type: 'sys', msg: '[ENGINE] ' + msg.trim()}, '*');
+};
+
+window._file_debug_scanf = function(blocksize) {
+    // Triggers a native prompt and returns the result (simulating scanf)
+    return window.parent.prompt("Engine Input Required:", "") || "";
+};
+
+// 2. The Core IO Bindings
+window._file_load = function(path) {
+    let target = window.__VFS_RESOLVER__(window.__VFS_CURRENT_DIR__, path);
+    if (target && window.__VFS_MAP__[target] !== undefined) {
+        return window.__VFS_MAP__[target];
+    }
+    return null;
+};
+
+window._file_save = function(path, data) {
+    let target = window.__VFS_RESOLVER__(window.__VFS_CURRENT_DIR__, path);
+    if (target) {
+        window.__VFS_MAP__[target] = data;
+        window.parent.postMessage({type: 'sys', msg: 'VFS Save -> ' + target}, '*');
+    }
+};
+
+window._file_remove = function(path) {
+    let target = window.__VFS_RESOLVER__(window.__VFS_CURRENT_DIR__, path);
+    if (target) delete window.__VFS_MAP__[target];
+};
+
+// 3. The Synchronous Directory Iterator (The magic fix)
+// Native C iterates directories while looping. We simulate that state here.
+window.__DIR_ITERATOR = { active: false, index: 0, items: [] };
+
+window._file__dir_open = function(path) {
+    let targetDir = window.__VFS_RESOLVER__(window.__VFS_CURRENT_DIR__, path);
+    if (!targetDir.endsWith('/')) targetDir += '/';
+    
+    let matches = Object.keys(window.__VFS_MAP__)
+        .filter(k => k.startsWith(targetDir) && k !== targetDir);
+        
+    if (matches.length === 0) return 0; // Return 0 if directory doesn't exist/empty
+    
+    // Isolate just the local file/folder names, remove duplicates
+    let localNames = matches.map(m => m.replace(targetDir, '').split('/')[0]);
+    localNames = localNames.filter((v, i, a) => a.indexOf(v) === i);
+    
+    // CRITICAL: Your _file_dir_search script specifically calls .shift() twice 
+    // to remove '.' and '..' like a native C dirent struct. We MUST provide them!
+    window.__DIR_ITERATOR.items = ['.', '..'].concat(localNames);
+    window.__DIR_ITERATOR.index = 0;
+    window.__DIR_ITERATOR.active = true;
+    return 1; // Success
+};
+
+window._file__dir_curfile_or_blank = function() {
+    if (!window.__DIR_ITERATOR.active || window.__DIR_ITERATOR.index >= window.__DIR_ITERATOR.items.length) return '';
+    return window.__DIR_ITERATOR.items[window.__DIR_ITERATOR.index];
+};
+
+window._file__dir_getnextfile_or_blank = function() {
+    window.__DIR_ITERATOR.index++;
+    return window._file__dir_curfile_or_blank();
+};
+
+window._file__dir_close = function() {
+    window.__DIR_ITERATOR.active = false;
+};
+
+
+                    // 4. Script Tag Interception
                     const scriptProto = HTMLScriptElement.prototype;
                     const srcDescriptor = Object.getOwnPropertyDescriptor(scriptProto, 'src');
                     Object.defineProperty(scriptProto, 'src', {
@@ -842,6 +1298,8 @@ utilize the injected environment variables during your app's boot sequence:
                     });
                 <\/script>
             `;
+
+
             html = html.replace(/<head>/i, '<head>' + interceptor);
 
             let resolvedStaticPaths = new Set();
@@ -860,12 +1318,18 @@ utilize the injected environment variables during your app's boot sequence:
                 return `${attribute}="${blobUrl}" data-vfs-path="${solvedPath}"`;
             });
 
-            document.getElementById(targetIframeId).src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+            //document.getElementById(targetIframeId).src = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+	    document.getElementById(targetIframeId).removeAttribute('src');            // Clear the old blob
+           document.getElementById(targetIframeId).srcdoc = html;
         }
 
         window.addEventListener('message', (e) => {
             if (e.data && e.data.type) logToConsole(e.data.type, e.data.msg);
         });
+
+
+
+
 
         function logToConsole(type, msg) {
             const logs = document.getElementById('console-logs');
@@ -876,6 +1340,10 @@ utilize the injected environment variables during your app's boot sequence:
 
         logToConsole('sys', 'Labyrinth Operating System Frame v8.2 Initialized Clean.');
         renderTree();
+
+
+
+
     </script>
 </body>
 </html>
