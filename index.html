@@ -1,10 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+
+    	<script src="jszip.min.js"></script>
+	
+
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>Labyrinth VFS Sandbox Engine v8.2</title>
-    <script src="jszip.min.js"></script>
     <style>
         :root { 
             --bg: #0f0f11; --panel: #16161a; --panel-light: #1e1e24;
@@ -1341,8 +1345,36 @@ window._file__dir_close = function() {
         logToConsole('sys', 'Labyrinth Operating System Frame v8.2 Initialized Clean.');
         renderTree();
 
+function bootVFSFromDOM() {
+    logToConsole('sys', 'Scraping DOM for pre-installed assets...');
+    
+    // Select all elements with the class
+    const assets = document.querySelectorAll('script.loadonStart');
+    
+    assets.forEach(tag => {
+        const path = tag.src || tag.getAttribute('src');
+        const content = tag.textContent || tag.innerHTML;
+        
+        if (path && content) {
+            // Ensure path is consistent (e.g., /bin/level_editor.html)
+            const vfsPath = path.startsWith('/') ? path : '/' + path;
+            
+            window.vfs[vfsPath] = content;
+            logToConsole('sys', `Pre-installed: ${vfsPath} (${content.length} bytes)`);
+        }
+    });
 
+    // Clean up the DOM: remove the tags so they don't sit around
+    assets.forEach(tag => tag.remove());
+    
+    // Refresh the UI
+    if (typeof renderTree === 'function') renderTree();
+}
 
+// Trigger this immediately when the page loads
+window.addEventListener('DOMContentLoaded', () => {
+    bootVFSFromDOM();
+});
 
     </script>
 </body>
